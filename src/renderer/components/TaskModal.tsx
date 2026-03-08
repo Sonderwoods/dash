@@ -15,6 +15,7 @@ import type { BranchInfo, GithubIssue, AzureDevOpsWorkItem, LinkedItem } from '.
 
 interface TaskModalProps {
   projectPath: string;
+  gitRemote: string | null;
   onClose: () => void;
   onCreate: (
     name: string,
@@ -27,7 +28,7 @@ interface TaskModalProps {
   ) => void;
 }
 
-export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
+export function TaskModal({ projectPath, gitRemote, onClose, onCreate }: TaskModalProps) {
   const [name, setName] = useState('');
   const [useWorktree, setUseWorktree] = useState(true);
   const [autoApprove, setAutoApprove] = useState(() => localStorage.getItem('yoloMode') === 'true');
@@ -57,9 +58,13 @@ export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
   const [selectedWorkItems, setSelectedWorkItems] = useState<AzureDevOpsWorkItem[]>([]);
   const [adoDropdownOpen, setAdoDropdownOpen] = useState(false);
 
-  // Provider tab (only shown when both are available)
-  type IssueProviderTab = 'github' | 'ado';
-  const [issueProviderTab, setIssueProviderTab] = useState<IssueProviderTab>('github');
+  // Detect provider from git remote
+  const isAdoRemote =
+    gitRemote != null &&
+    (gitRemote.includes('dev.azure.com') || gitRemote.includes('visualstudio.com'));
+  // Show the provider that matches the remote; fall back to whichever is available
+  const showGithub = ghAvailable && (!isAdoRemote || !adoAvailable);
+  const showAdo = adoAvailable && (isAdoRemote || !ghAvailable);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -291,11 +296,6 @@ export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
     setSelectedWorkItems((prev) => prev.filter((i) => i.id !== id));
   }
 
-  // Determine effective provider tab
-  useEffect(() => {
-    if (!ghAvailable && adoAvailable) setIssueProviderTab('ado');
-  }, [ghAvailable, adoAvailable]);
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop animate-fade-in"
@@ -464,56 +464,21 @@ export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
           )}
 
           {/* Issue/Work Item picker — shown when GitHub or ADO is available */}
-          {(ghAvailable || adoAvailable) && (
+          {(showGithub || showAdo) && (
             <div className="mb-4">
               <label className="block text-[12px] font-medium text-muted-foreground/70 mb-2">
                 <span className="flex items-center gap-1.5">
-                  <Search size={12} strokeWidth={1.8} />
-                  Link issues
+                  {showAdo && !showGithub ? (
+                    <Search size={12} strokeWidth={1.8} />
+                  ) : (
+                    <Github size={12} strokeWidth={1.8} />
+                  )}
+                  {showAdo && !showGithub ? 'Link work items' : 'Link issues'}
                   <span className="text-muted-foreground/40 font-normal">optional</span>
                 </span>
               </label>
 
-              {/* Provider tabs — only when both are available */}
-              {ghAvailable && adoAvailable && (
-                <div className="flex gap-0 mb-2 border-b border-border/40">
-                  <button
-                    type="button"
-                    onClick={() => setIssueProviderTab('github')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium border-b-2 transition-all duration-150 ${
-                      issueProviderTab === 'github'
-                        ? 'border-primary text-foreground'
-                        : 'border-transparent text-foreground/50 hover:text-foreground/80'
-                    }`}
-                  >
-                    <Github size={11} strokeWidth={1.8} />
-                    GitHub
-                    {selectedIssues.length > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-medium">
-                        {selectedIssues.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIssueProviderTab('ado')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium border-b-2 transition-all duration-150 ${
-                      issueProviderTab === 'ado'
-                        ? 'border-primary text-foreground'
-                        : 'border-transparent text-foreground/50 hover:text-foreground/80'
-                    }`}
-                  >
-                    Azure DevOps
-                    {selectedWorkItems.length > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-primary/15 text-primary text-[9px] font-medium">
-                        {selectedWorkItems.length}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Selected items pills (both providers) */}
+              {/* Selected items pills */}
               {(selectedIssues.length > 0 || selectedWorkItems.length > 0) && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {selectedIssues.map((issue) => (
@@ -542,7 +507,7 @@ export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
               )}
 
               {/* GitHub issue search */}
-              {((ghAvailable && !adoAvailable) || issueProviderTab === 'github') && ghAvailable && (
+              {showGithub && (
                 <div className="relative" ref={issueDropdownRef}>
                   <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-background border border-input/60 focus-within:ring-2 focus-within:ring-ring/30 focus-within:border-ring/50 transition-all duration-150">
                     {issueLoading ? (
@@ -645,7 +610,7 @@ export function TaskModal({ projectPath, onClose, onCreate }: TaskModalProps) {
               )}
 
               {/* ADO work item search */}
-              {((adoAvailable && !ghAvailable) || issueProviderTab === 'ado') && adoAvailable && (
+              {showAdo && (
                 <div className="relative" ref={adoDropdownRef}>
                   <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-background border border-input/60 focus-within:ring-2 focus-within:ring-ring/30 focus-within:border-ring/50 transition-all duration-150">
                     {adoLoading ? (
