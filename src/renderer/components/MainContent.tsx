@@ -1,7 +1,7 @@
 import React from 'react';
 import { TerminalPane } from './TerminalPane';
 import { Terminal, FolderOpen, GitBranch, Globe } from 'lucide-react';
-import type { Project, Task, RemoteControlState } from '../../shared/types';
+import type { Project, Task, LinkedItem, RemoteControlState } from '../../shared/types';
 
 /** Convert a git remote URL (SSH or HTTPS) to a GitHub issues base URL */
 function issueUrl(remote: string | null, num: number): string | null {
@@ -13,6 +13,12 @@ function issueUrl(remote: string | null, num: number): string | null {
   const https = remote.match(/https:\/\/github\.com\/(.+?)(?:\.git)?$/);
   if (https) return `https://github.com/${https[1]}/issues/${num}`;
   return null;
+}
+
+/** Get display URL for a linked item */
+function linkedItemUrl(item: LinkedItem, remote: string | null): string | null {
+  if (item.provider === 'ado') return item.url || null;
+  return issueUrl(remote, item.id);
 }
 
 interface MainContentProps {
@@ -137,7 +143,33 @@ export function MainContent({
             <GitBranch size={11} strokeWidth={2} />
             <span className="text-[11px] font-mono">{activeTask.branch}</span>
           </div>
-          {activeTask.linkedIssues && activeTask.linkedIssues.length > 0 && (
+          {activeTask.linkedItems && activeTask.linkedItems.length > 0 ? (
+            <div className="flex items-center gap-1">
+              {activeTask.linkedItems.map((item) => {
+                const url = linkedItemUrl(item, activeProject?.gitRemote ?? null);
+                return url ? (
+                  <a
+                    key={`${item.provider}-${item.id}`}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium hover:bg-primary/20 transition-colors"
+                    title={item.title || undefined}
+                  >
+                    #{item.id}
+                  </a>
+                ) : (
+                  <span
+                    key={`${item.provider}-${item.id}`}
+                    className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium"
+                    title={item.title || undefined}
+                  >
+                    #{item.id}
+                  </span>
+                );
+              })}
+            </div>
+          ) : activeTask.linkedIssues && activeTask.linkedIssues.length > 0 ? (
             <div className="flex items-center gap-1">
               {activeTask.linkedIssues.map((num) => {
                 const url = issueUrl(activeProject?.gitRemote ?? null, num);
@@ -161,7 +193,7 @@ export function MainContent({
                 );
               })}
             </div>
-          )}
+          ) : null}
           {taskActivity[activeTask.id] && (
             <button
               onClick={() => onEnableRemoteControl?.(activeTask.id)}

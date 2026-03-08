@@ -9,6 +9,19 @@ export interface Project {
   updatedAt: string;
 }
 
+export type IssueProvider = 'github' | 'ado';
+
+export interface LinkedItem {
+  provider: IssueProvider;
+  id: number;
+  title: string;
+  url: string;
+  /** ADO-specific metadata for richer task context */
+  type?: string;
+  state?: string;
+  tags?: string[];
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -18,7 +31,9 @@ export interface Task {
   status: string;
   useWorktree: boolean;
   autoApprove: boolean;
+  /** @deprecated Use linkedItems instead. Kept for backwards compatibility with existing DB rows. TODO: remove once all rows are migrated. */
   linkedIssues: number[] | null;
+  linkedItems: LinkedItem[] | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -194,6 +209,25 @@ export interface GithubIssue {
   body: string;
   url: string;
   assignees?: string[];
+}
+
+// ── Azure DevOps Types ─────────────────────────────────────
+
+export interface AzureDevOpsWorkItem {
+  id: number;
+  title: string;
+  state: string;
+  type: string;
+  url: string;
+  assignedTo?: string;
+  tags?: string[];
+  description?: string;
+}
+
+export interface AzureDevOpsConfig {
+  organizationUrl: string;
+  project: string;
+  pat: string;
 }
 
 // ── Remote Control Types ────────────────────────────────────

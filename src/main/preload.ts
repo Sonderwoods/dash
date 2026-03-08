@@ -140,6 +140,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   githubLinkBranch: (cwd: string, issueNumber: number, branch: string) =>
     ipcRenderer.invoke('github:link-branch', { cwd, issueNumber, branch }),
 
+  // Azure DevOps
+  adoCheckConfigured: () => ipcRenderer.invoke('ado:check-configured'),
+  adoTestConnection: (config: unknown) => ipcRenderer.invoke('ado:test-connection', config),
+  adoSaveConfig: (config: unknown) => ipcRenderer.invoke('ado:save-config', config),
+  adoGetConfig: () => ipcRenderer.invoke('ado:get-config'),
+  adoRemoveConfig: () => ipcRenderer.invoke('ado:remove-config'),
+  adoSearchWorkItems: (query: string) => ipcRenderer.invoke('ado:search-work-items', { query }),
+  adoGetWorkItem: (id: number) => ipcRenderer.invoke('ado:get-work-item', { id }),
+  adoPostBranchComment: (workItemId: number, branch: string) =>
+    ipcRenderer.invoke('ado:post-branch-comment', { workItemId, branch }),
+
   // Git detection
   detectGit: (folderPath: string) => ipcRenderer.invoke('app:detectGit', folderPath),
   detectClaude: () => ipcRenderer.invoke('app:detectClaude'),

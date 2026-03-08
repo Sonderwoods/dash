@@ -169,6 +169,18 @@ export function SettingsModal({
     return () => cleanups.forEach((fn) => fn());
   }, []);
 
+  // Azure DevOps state
+  const [adoOrgUrl, setAdoOrgUrl] = useState('');
+  const [adoProject, setAdoProject] = useState('');
+  const [adoPat, setAdoPat] = useState('');
+  const [adoConfigured, setAdoConfigured] = useState(false);
+  const [adoTesting, setAdoTesting] = useState(false);
+  const [adoTestResult, setAdoTestResult] = useState<'success' | 'error' | null>(null);
+  const [adoSaving, setAdoSaving] = useState(false);
+
+  const isAdoUrlValid = adoOrgUrl.startsWith('https://');
+  const normalizeAdoUrl = (url: string) => url.replace(/\/+$/, '');
+
   useEffect(() => {
     window.electronAPI.detectClaude().then((resp) => {
       if (resp.success) setClaudeInfo(resp.data ?? null);
@@ -177,6 +189,15 @@ export function SettingsModal({
     window.electronAPI.getClaudeAttribution(activeProjectPath).then((resp) => {
       if (resp.success && resp.data != null) {
         setClaudeDefaultAttribution(resp.data);
+      }
+    });
+    // Load ADO config
+    window.electronAPI.adoGetConfig().then((resp) => {
+      if (resp.success && resp.data) {
+        setAdoOrgUrl(resp.data.organizationUrl);
+        setAdoProject(resp.data.project);
+        setAdoPat(resp.data.pat);
+        setAdoConfigured(true);
       }
     });
   }, [activeProjectPath]);
@@ -715,6 +736,168 @@ export function SettingsModal({
                       </code>
                     </p>
                   )}
+                </div>
+              </div>
+
+              {/* Azure DevOps */}
+              <div
+                className="p-4 rounded-xl border border-border/40"
+                style={{ background: 'hsl(var(--surface-2))' }}
+              >
+                <div className="flex items-start gap-3.5 mb-3">
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      adoConfigured ? 'bg-[hsl(var(--git-added)/0.12)]' : 'bg-accent/60'
+                    }`}
+                  >
+                    {adoConfigured ? (
+                      <Check size={14} className="text-[hsl(var(--git-added))]" strokeWidth={2.5} />
+                    ) : (
+                      <AlertCircle size={14} className="text-muted-foreground/40" strokeWidth={2} />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-foreground/90">Azure DevOps</p>
+                    <p className="text-[11px] text-foreground/50">
+                      {adoConfigured ? 'Connected' : 'Not configured'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] text-foreground/50 mb-1">
+                      Organization URL
+                    </label>
+                    <input
+                      type="text"
+                      value={adoOrgUrl}
+                      onChange={(e) => {
+                        setAdoOrgUrl(e.target.value);
+                        setAdoTestResult(null);
+                      }}
+                      placeholder="https://dev.azure.com/myorg"
+                      className={`w-full px-3 py-2 rounded-lg bg-background border text-foreground text-[12px] font-mono placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 ${
+                        adoOrgUrl && !isAdoUrlValid ? 'border-destructive/60' : 'border-input/60'
+                      }`}
+                    />
+                    {adoOrgUrl && !isAdoUrlValid && (
+                      <p className="text-[10px] text-destructive/70 mt-0.5">
+                        Must start with https://
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-foreground/50 mb-1">Project</label>
+                    <input
+                      type="text"
+                      value={adoProject}
+                      onChange={(e) => {
+                        setAdoProject(e.target.value);
+                        setAdoTestResult(null);
+                      }}
+                      placeholder="MyProject"
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-input/60 text-foreground text-[12px] placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-foreground/50 mb-1">
+                      Personal Access Token
+                    </label>
+                    <input
+                      type="password"
+                      value={adoPat}
+                      onChange={(e) => {
+                        setAdoPat(e.target.value);
+                        setAdoTestResult(null);
+                      }}
+                      placeholder="Enter PAT..."
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-input/60 text-foreground text-[12px] font-mono placeholder:text-muted-foreground/30 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40"
+                    />
+                  </div>
+
+                  {adoTestResult && (
+                    <div
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] ${
+                        adoTestResult === 'success'
+                          ? 'bg-[hsl(var(--git-added)/0.1)] text-[hsl(var(--git-added))]'
+                          : 'bg-destructive/10 text-destructive'
+                      }`}
+                    >
+                      {adoTestResult === 'success' ? (
+                        <Check size={12} strokeWidth={2.5} />
+                      ) : (
+                        <AlertCircle size={12} strokeWidth={2} />
+                      )}
+                      {adoTestResult === 'success'
+                        ? 'Connection successful'
+                        : 'Connection failed — check credentials'}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={!isAdoUrlValid || !adoProject || !adoPat || adoTesting}
+                      onClick={async () => {
+                        setAdoTesting(true);
+                        setAdoTestResult(null);
+                        try {
+                          const resp = await window.electronAPI.adoTestConnection({
+                            organizationUrl: normalizeAdoUrl(adoOrgUrl),
+                            project: adoProject,
+                            pat: adoPat,
+                          });
+                          setAdoTestResult(resp.success && resp.data ? 'success' : 'error');
+                        } catch {
+                          setAdoTestResult('error');
+                        } finally {
+                          setAdoTesting(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-medium border border-border/60 text-foreground/70 hover:bg-accent/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+                    >
+                      {adoTesting ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isAdoUrlValid || !adoProject || !adoPat || adoSaving}
+                      onClick={async () => {
+                        setAdoSaving(true);
+                        try {
+                          const normalized = normalizeAdoUrl(adoOrgUrl);
+                          await window.electronAPI.adoSaveConfig({
+                            organizationUrl: normalized,
+                            project: adoProject,
+                            pat: adoPat,
+                          });
+                          setAdoOrgUrl(normalized);
+                          setAdoConfigured(true);
+                        } finally {
+                          setAdoSaving(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary text-primary-foreground hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-150"
+                    >
+                      {adoSaving ? 'Saving...' : 'Save'}
+                    </button>
+                    {adoConfigured && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await window.electronAPI.adoRemoveConfig();
+                          setAdoOrgUrl('');
+                          setAdoProject('');
+                          setAdoPat('');
+                          setAdoConfigured(false);
+                          setAdoTestResult(null);
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-medium text-destructive/70 hover:bg-destructive/10 transition-all duration-150"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

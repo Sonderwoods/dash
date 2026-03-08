@@ -23,6 +23,7 @@ import type {
   GitStatus,
   DiffResult,
   GithubIssue,
+  LinkedItem,
   RemoteControlState,
 } from '../shared/types';
 import { loadKeybindings, saveKeybindings, matchesBinding } from './keybindings';
@@ -625,6 +626,7 @@ export function App() {
     baseRef?: string,
     linkedIssues?: GithubIssue[],
     pushRemote?: boolean,
+    linkedItems?: LinkedItem[],
   ) {
     const targetProjectId = taskModalProjectId || activeProjectId;
     const targetProject = projects.find((p) => p.id === targetProjectId);
@@ -671,12 +673,16 @@ export function App() {
       useWorktree,
       autoApprove,
       linkedIssues: linkedIssueNumbers,
+      linkedItems: linkedItems ?? null,
     });
 
     if (saveResp.success && saveResp.data) {
       const taskId = saveResp.data.id;
 
       // Write task context file for SessionStart hook injection
+      const adoItems = linkedItems?.filter((i) => i.provider === 'ado') ?? [];
+      const contextBlocks: string[] = [];
+
       if (linkedIssues && linkedIssues.length > 0) {
         const issueBlocks = linkedIssues.map((issue) => {
           const labels = issue.labels.length > 0 ? `Labels: ${issue.labels.join(', ')}\n` : '';
@@ -685,13 +691,34 @@ export function App() {
             : '';
           return `## Issue #${issue.number}: ${issue.title}\n${labels}${bodyExcerpt}`;
         });
+        contextBlocks.push(
+          `I'm working on the following GitHub issue(s):\n\n${issueBlocks.join('\n\n')}`,
+        );
+      }
 
-        const prompt = `I'm working on the following GitHub issue(s):\n\n${issueBlocks.join('\n\n')}\n\nPlease help me implement a solution for this.`;
+      if (adoItems.length > 0) {
+        const wiBlocks = adoItems.map((wi) => {
+          const meta = [
+            wi.type ? `Type: ${wi.type}` : '',
+            wi.state ? `State: ${wi.state}` : '',
+            wi.tags?.length ? `Tags: ${wi.tags.join(', ')}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+          return `## Work Item #${wi.id}: ${wi.title}\n${meta ? meta + '\n' : ''}URL: ${wi.url}`;
+        });
+        contextBlocks.push(
+          `I'm working on the following Azure DevOps work item(s):\n\n${wiBlocks.join('\n\n')}`,
+        );
+      }
+
+      if (contextBlocks.length > 0) {
+        const prompt = `${contextBlocks.join('\n\n')}\n\nPlease help me implement a solution for this.`;
         window.electronAPI.ptyWriteTaskContext({
           cwd: taskPath,
           prompt,
           meta: {
-            issueNumbers: linkedIssues.map((i) => i.number),
+            issueNumbers: linkedIssues?.map((i) => i.number) ?? [],
             gitRemote: targetProject.gitRemote ?? undefined,
           },
         });
@@ -711,8 +738,7 @@ export function App() {
         projectPath: targetProject.path,
       });
 
-      // Fire-and-forget: post branch comment on each linked issue
-      // (branch linking happens in the worktree service before push)
+      // Fire-and-forget: post branch comment on each linked GitHub issue
       if (linkedIssues && linkedIssues.length > 0) {
         for (const issue of linkedIssues) {
           window.electronAPI
@@ -720,6 +746,15 @@ export function App() {
             .catch(() => {
               // Best effort
             });
+        }
+      }
+
+      // Fire-and-forget: post branch comment on each linked ADO work item
+      if (adoItems.length > 0) {
+        for (const wi of adoItems) {
+          window.electronAPI.adoPostBranchComment(wi.id, branch).catch(() => {
+            // Best effort
+          });
         }
       }
     }

@@ -9,6 +9,8 @@ import type {
   DiffResult,
   BranchInfo,
   GithubIssue,
+  AzureDevOpsWorkItem,
+  AzureDevOpsConfig,
   CommitGraphData,
   CommitDetail,
   RemoteControlState,
@@ -165,6 +167,16 @@ export interface ElectronAPI {
     issueNumber: number,
     branch: string,
   ) => Promise<IpcResponse<void>>;
+
+  // Azure DevOps
+  adoCheckConfigured: () => Promise<IpcResponse<boolean>>;
+  adoTestConnection: (config: AzureDevOpsConfig) => Promise<IpcResponse<boolean>>;
+  adoSaveConfig: (config: AzureDevOpsConfig) => Promise<IpcResponse<void>>;
+  adoGetConfig: () => Promise<IpcResponse<AzureDevOpsConfig | null>>;
+  adoRemoveConfig: () => Promise<IpcResponse<void>>;
+  adoSearchWorkItems: (query: string) => Promise<IpcResponse<AzureDevOpsWorkItem[]>>;
+  adoGetWorkItem: (id: number) => Promise<IpcResponse<AzureDevOpsWorkItem>>;
+  adoPostBranchComment: (workItemId: number, branch: string) => Promise<IpcResponse<void>>;
 
   // Git detection
   detectGit: (
