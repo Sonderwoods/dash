@@ -1,4 +1,4 @@
-import type { AzureDevOpsConfig, AzureDevOpsWorkItem } from '@shared/types';
+import type { AzureDevOpsConfig, AzureDevOpsWorkItem, AzureDevOpsWorkItemRef } from '@shared/types';
 
 const TIMEOUT_MS = 15_000;
 const API_VERSION = '7.1';
@@ -69,16 +69,13 @@ export class AzureDevOpsService {
     const ids = wiqlResult.workItems?.map((w) => w.id).slice(0, 20) ?? [];
     if (ids.length === 0) return [];
 
-    return this.getWorkItemsByIds(config, ids);
+    return this.getWorkItemsByIds(config, ids, { expand: true });
   }
 
   static async getWorkItem(config: AzureDevOpsConfig, id: number): Promise<AzureDevOpsWorkItem> {
-    const result = (await this.request(
-      config,
-      `${config.project}/_apis/wit/workitems/${id}?$expand=none`,
-    )) as { id: number; fields: Record<string, unknown>; _links: { html: { href: string } } };
-
-    return this.mapWorkItem(result);
+    const items = await this.getWorkItemsByIds(config, [id], { expand: true });
+    if (items.length === 0) throw new Error(`Work item ${id} not found`);
+    return items[0];
   }
 
   static async postBranchComment(
@@ -104,29 +101,116 @@ export class AzureDevOpsService {
   private static async getWorkItemsByIds(
     config: AzureDevOpsConfig,
     ids: number[],
+    options?: { expand?: boolean },
   ): Promise<AzureDevOpsWorkItem[]> {
     const idsParam = ids.join(',');
     const fields =
-      'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.Description';
+      'System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Tags,System.Description,Microsoft.VSTS.Common.AcceptanceCriteria';
+    const expand = options?.expand ? '&$expand=relations' : '';
     const result = (await this.request(
       config,
-      `${config.project}/_apis/wit/workitems?ids=${idsParam}&fields=${fields}`,
+      `${config.project}/_apis/wit/workitems?ids=${idsParam}&fields=${fields}${expand}`,
     )) as {
-      value: Array<{
-        id: number;
-        fields: Record<string, unknown>;
-        _links: { html: { href: string } };
-      }>;
+      value: Array<RawWorkItem>;
     };
 
-    return result.value.map((item) => this.mapWorkItem(item));
+    const items = result.value.map((item) => this.mapWorkItem(item));
+
+    // Resolve parent chains if relations were expanded
+    if (options?.expand) {
+      await this.resolveParents(config, result.value, items);
+    }
+
+    return items;
   }
 
-  private static mapWorkItem(raw: {
-    id: number;
-    fields: Record<string, unknown>;
-    _links: { html: { href: string } };
-  }): AzureDevOpsWorkItem {
+  /** Walk parent links up to 3 levels (e.g. Task → Story → Feature → Epic) */
+  private static async resolveParents(
+    config: AzureDevOpsConfig,
+    rawItems: RawWorkItem[],
+    mapped: AzureDevOpsWorkItem[],
+  ): Promise<void> {
+    const PARENT_REL = 'System.LinkTypes.Hierarchy-Reverse';
+
+    // Collect all parent IDs needed
+    const parentIdMap = new Map<number, number[]>(); // itemId → chain of parent IDs
+    for (const raw of rawItems) {
+      const parentRel = raw.relations?.find((r) => r.rel === PARENT_REL);
+      if (parentRel) {
+        const parentId = this.extractIdFromUrl(parentRel.url);
+        if (parentId) parentIdMap.set(raw.id, [parentId]);
+      }
+    }
+
+    if (parentIdMap.size === 0) return;
+
+    // Fetch up to 3 levels of parents
+    const allParentIds = new Set<number>();
+    const fetched = new Map<number, AzureDevOpsWorkItemRef>();
+
+    for (let level = 0; level < 3; level++) {
+      const idsToFetch = new Set<number>();
+      for (const chain of parentIdMap.values()) {
+        const lastId = chain[chain.length - 1];
+        if (!fetched.has(lastId)) idsToFetch.add(lastId);
+      }
+      // Remove already-fetched
+      for (const id of allParentIds) idsToFetch.delete(id);
+      if (idsToFetch.size === 0) break;
+
+      try {
+        // Single request: fetch fields + relations together
+        const result = (await this.request(
+          config,
+          `${config.project}/_apis/wit/workitems?ids=${[...idsToFetch].join(',')}&$expand=relations&fields=System.Id,System.Title,System.State,System.WorkItemType`,
+        )) as { value: Array<RawWorkItem> };
+
+        for (const raw of result.value) {
+          const item = this.mapWorkItem(raw);
+          fetched.set(item.id, {
+            id: item.id,
+            title: item.title,
+            type: item.type,
+            state: item.state,
+            url: item.url,
+          });
+          allParentIds.add(item.id);
+
+          // Extend chains with next-level parent
+          const nextParent = raw.relations?.find((r) => r.rel === PARENT_REL);
+          if (nextParent) {
+            const nextId = this.extractIdFromUrl(nextParent.url);
+            if (nextId) {
+              for (const chain of parentIdMap.values()) {
+                if (chain[chain.length - 1] === raw.id) {
+                  chain.push(nextId);
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        break; // Best effort — stop if any level fails
+      }
+    }
+
+    // Attach parent chains to mapped items
+    for (const item of mapped) {
+      const chain = parentIdMap.get(item.id);
+      if (chain) {
+        item.parents = chain
+          .map((id) => fetched.get(id))
+          .filter(Boolean) as AzureDevOpsWorkItemRef[];
+      }
+    }
+  }
+
+  private static extractIdFromUrl(url: string): number | null {
+    const match = url.match(/\/workItems\/(\d+)$/i);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  private static mapWorkItem(raw: RawWorkItem): AzureDevOpsWorkItem {
     const fields = raw.fields;
     const assignedTo = fields['System.AssignedTo'] as
       | { displayName?: string; uniqueName?: string }
@@ -147,6 +231,14 @@ export class AzureDevOpsService {
             .filter(Boolean)
         : undefined,
       description: fields['System.Description'] as string | undefined,
+      acceptanceCriteria: fields['Microsoft.VSTS.Common.AcceptanceCriteria'] as string | undefined,
     };
   }
+}
+
+interface RawWorkItem {
+  id: number;
+  fields: Record<string, unknown>;
+  _links: { html: { href: string } };
+  relations?: Array<{ rel: string; url: string; attributes?: Record<string, unknown> }>;
 }

@@ -249,6 +249,8 @@ export function TaskModal({ projectPath, gitRemote, onClose, onCreate }: TaskMod
           state: wi.state,
           tags: wi.tags,
           description: wi.description,
+          acceptanceCriteria: wi.acceptanceCriteria,
+          parents: wi.parents,
         })),
       ];
 
