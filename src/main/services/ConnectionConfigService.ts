@@ -13,7 +13,7 @@ interface StoredConfig {
 
 const CONFIG_FILE = 'config.json';
 
-export class ConfigService {
+export class ConnectionConfigService {
   private static getConfigPath(): string {
     return path.join(app.getPath('userData'), CONFIG_FILE);
   }
@@ -49,8 +49,7 @@ export class ConfigService {
       } else {
         pat = Buffer.from(config.ado.encryptedPat, 'base64').toString('utf-8');
       }
-    } catch (err) {
-      console.error('[ConfigService] Failed to decrypt ADO PAT:', err);
+    } catch {
       return null;
     }
 
@@ -86,7 +85,9 @@ export class ConfigService {
     this.writeConfig(config);
   }
 
+  /** Check presence of ADO config without decrypting the PAT */
   static isAdoConfigured(): boolean {
-    return this.getAdoConfig() !== null;
+    const config = this.readConfig();
+    return config.ado != null;
   }
 }

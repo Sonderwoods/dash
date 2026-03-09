@@ -11,19 +11,29 @@ export interface Project {
 
 export type IssueProvider = 'github' | 'ado';
 
-export interface LinkedItem {
-  provider: IssueProvider;
+export interface LinkedGithubIssue {
+  provider: 'github';
   id: number;
   title: string;
   url: string;
-  /** ADO-specific metadata for richer task context */
-  type?: string;
-  state?: string;
+  labels?: string[];
+  body?: string;
+}
+
+export interface LinkedAdoWorkItem {
+  provider: 'ado';
+  id: number;
+  title: string;
+  url: string;
+  type: string;
+  state: string;
   tags?: string[];
   description?: string;
   acceptanceCriteria?: string;
   parents?: AzureDevOpsWorkItemRef[];
 }
+
+export type LinkedItem = LinkedGithubIssue | LinkedAdoWorkItem;
 
 export interface Task {
   id: string;
@@ -34,8 +44,6 @@ export interface Task {
   status: string;
   useWorktree: boolean;
   autoApprove: boolean;
-  /** @deprecated Use linkedItems instead. Kept for backwards compatibility with existing DB rows. TODO: remove once all rows are migrated. */
-  linkedIssues: number[] | null;
   linkedItems: LinkedItem[] | null;
   archivedAt: string | null;
   createdAt: string;

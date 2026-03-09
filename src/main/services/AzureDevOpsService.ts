@@ -61,13 +61,10 @@ export class AzureDevOpsService {
       ? `SELECT [System.Id] FROM WorkItems WHERE [System.Title] CONTAINS '${sanitized}' ORDER BY [System.ChangedDate] DESC`
       : `SELECT [System.Id] FROM WorkItems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Removed' ORDER BY [System.ChangedDate] DESC`;
 
-    console.log('[ADO WIQL]', wiql);
     const wiqlResult = (await this.request(config, `${config.project}/_apis/wit/wiql`, {
       method: 'POST',
       body: { query: wiql },
     })) as { workItems?: { id: number }[] };
-
-    console.log('[ADO WIQL] result workItems count:', wiqlResult.workItems?.length ?? 0);
     const ids = wiqlResult.workItems?.map((w) => w.id).slice(0, 20) ?? [];
     if (ids.length === 0) return [];
 

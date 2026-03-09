@@ -22,10 +22,12 @@ import type {
   Task,
   GitStatus,
   DiffResult,
-  GithubIssue,
-  LinkedItem,
+  LinkedGithubIssue,
+  LinkedAdoWorkItem,
   RemoteControlState,
 } from '../shared/types';
+import type { CreateTaskOptions } from './components/TaskModal';
+import { formatTaskContextPrompt } from '../shared/taskContext';
 import { loadKeybindings, saveKeybindings, matchesBinding } from './keybindings';
 import type { KeyBindingMap } from './keybindings';
 import { sessionRegistry } from './terminal/SessionRegistry';
@@ -619,29 +621,27 @@ export function App() {
     setShowTaskModal(true);
   }
 
-  async function handleCreateTask(
-    name: string,
-    useWorktree: boolean,
-    autoApprove: boolean,
-    baseRef?: string,
-    linkedIssues?: GithubIssue[],
-    pushRemote?: boolean,
-    linkedItems?: LinkedItem[],
-  ) {
+  async function handleCreateTask(options: CreateTaskOptions) {
+    const { name, useWorktree, autoApprove, baseRef, pushRemote, linkedItems } = options;
+
     const targetProjectId = taskModalProjectId || activeProjectId;
     const targetProject = projects.find((p) => p.id === targetProjectId);
     if (!targetProject) return;
 
     let worktreeInfo: { branch: string; path: string } | null = null;
 
-    const linkedIssueNumbers = linkedIssues?.map((i) => i.number);
+    // Split linked items by provider
+    const ghItems =
+      linkedItems?.filter((i): i is LinkedGithubIssue => i.provider === 'github') ?? [];
+    const adoItems = linkedItems?.filter((i): i is LinkedAdoWorkItem => i.provider === 'ado') ?? [];
+    const ghIssueNumbers = ghItems.map((i) => i.id);
 
     if (useWorktree) {
       const claimResp = await window.electronAPI.worktreeClaimReserve({
         projectId: targetProject.id,
         taskName: name,
         baseRef,
-        linkedIssueNumbers,
+        linkedIssueNumbers: ghIssueNumbers.length > 0 ? ghIssueNumbers : undefined,
         pushRemote,
       });
 
@@ -653,7 +653,7 @@ export function App() {
           taskName: name,
           baseRef,
           projectId: targetProject.id,
-          linkedIssueNumbers,
+          linkedIssueNumbers: ghIssueNumbers.length > 0 ? ghIssueNumbers : undefined,
           pushRemote,
         });
         if (createResp.success && createResp.data) {
@@ -672,74 +672,29 @@ export function App() {
       path: taskPath,
       useWorktree,
       autoApprove,
-      linkedIssues: linkedIssueNumbers,
       linkedItems: linkedItems ?? null,
     });
 
     if (saveResp.success && saveResp.data) {
       const taskId = saveResp.data.id;
 
-      // Write task context file for SessionStart hook injection
-      const adoItems = linkedItems?.filter((i) => i.provider === 'ado') ?? [];
-      const contextBlocks: string[] = [];
-
-      if (linkedIssues && linkedIssues.length > 0) {
-        const issueBlocks = linkedIssues.map((issue) => {
-          const labels = issue.labels.length > 0 ? `Labels: ${issue.labels.join(', ')}\n` : '';
-          const bodyExcerpt = issue.body
-            ? issue.body.slice(0, 2000) + (issue.body.length > 2000 ? '...' : '')
-            : '';
-          return `## Issue #${issue.number}: ${issue.title}\n${labels}${bodyExcerpt}`;
-        });
-        contextBlocks.push(
-          `I'm working on the following GitHub issue(s):\n\n${issueBlocks.join('\n\n')}`,
-        );
-      }
-
-      if (adoItems.length > 0) {
-        const wiBlocks = adoItems.map((wi) => {
-          const meta = [
-            wi.type ? `Type: ${wi.type}` : '',
-            wi.state ? `State: ${wi.state}` : '',
-            wi.tags?.length ? `Tags: ${wi.tags.join(', ')}` : '',
-            wi.parents?.length
-              ? `Hierarchy: ${wi.parents.map((p) => `${p.type} #${p.id} "${p.title}"`).join(' → ')}`
-              : '',
-          ]
-            .filter(Boolean)
-            .join('\n');
-          const truncate = (s: string | undefined, max: number) =>
-            s ? s.slice(0, max) + (s.length > max ? '...' : '') : '';
-          const desc = truncate(wi.description, 2000);
-          const ac = truncate(wi.acceptanceCriteria, 1000);
-          const sections = [
-            `## Work Item #${wi.id}: ${wi.title}`,
-            meta,
-            `URL: ${wi.url}`,
-            desc ? `### Description\n${desc}` : '',
-            ac ? `### Acceptance Criteria\n${ac}` : '',
-          ]
-            .filter(Boolean)
-            .join('\n');
-          return sections;
-        });
-        contextBlocks.push(
-          `I'm working on the following Azure DevOps work item(s):\n\n${wiBlocks.join('\n\n---\n\n')}`,
-        );
-      }
-
-      if (contextBlocks.length > 0) {
-        const prompt = `${contextBlocks.join('\n\n')}\n\nPlease help me implement a solution for this.`;
-        window.electronAPI.ptyWriteTaskContext({
-          cwd: taskPath,
-          prompt,
-          meta: {
-            issueNumbers: linkedIssues?.map((i) => i.number) ?? [],
-            gitRemote: targetProject.gitRemote ?? undefined,
-            adoWorkItems:
-              adoItems.length > 0 ? adoItems.map((wi) => ({ id: wi.id, url: wi.url })) : undefined,
-          },
-        });
+      // Write task context for SessionStart hook injection
+      if (linkedItems && linkedItems.length > 0) {
+        const prompt = formatTaskContextPrompt(linkedItems);
+        if (prompt) {
+          window.electronAPI.ptyWriteTaskContext({
+            cwd: taskPath,
+            prompt,
+            meta: {
+              issueNumbers: ghIssueNumbers,
+              gitRemote: targetProject.gitRemote ?? undefined,
+              adoWorkItems:
+                adoItems.length > 0
+                  ? adoItems.map((wi) => ({ id: wi.id, url: wi.url }))
+                  : undefined,
+            },
+          });
+        }
       }
 
       await window.electronAPI.getOrCreateDefaultConversation(taskId);
@@ -757,23 +712,13 @@ export function App() {
       });
 
       // Fire-and-forget: post branch comment on each linked GitHub issue
-      if (linkedIssues && linkedIssues.length > 0) {
-        for (const issue of linkedIssues) {
-          window.electronAPI
-            .githubPostBranchComment(targetProject.path, issue.number, branch)
-            .catch(() => {
-              // Best effort
-            });
-        }
+      for (const num of ghIssueNumbers) {
+        window.electronAPI.githubPostBranchComment(targetProject.path, num, branch).catch(() => {});
       }
 
       // Fire-and-forget: post branch comment on each linked ADO work item
-      if (adoItems.length > 0) {
-        for (const wi of adoItems) {
-          window.electronAPI.adoPostBranchComment(wi.id, branch).catch(() => {
-            // Best effort
-          });
-        }
+      for (const wi of adoItems) {
+        window.electronAPI.adoPostBranchComment(wi.id, branch).catch(() => {});
       }
     }
   }
@@ -1120,10 +1065,6 @@ export function App() {
         <TaskModal
           projectPath={
             projects.find((p) => p.id === (taskModalProjectId || activeProjectId))?.path ?? ''
-          }
-          gitRemote={
-            projects.find((p) => p.id === (taskModalProjectId || activeProjectId))?.gitRemote ??
-            null
           }
           onClose={() => setShowTaskModal(false)}
           onCreate={handleCreateTask}

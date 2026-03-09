@@ -17,8 +17,8 @@ function issueUrl(remote: string | null, num: number): string | null {
 
 /** Get display URL for a linked item */
 function linkedItemUrl(item: LinkedItem, remote: string | null): string | null {
-  if (item.provider === 'ado') return item.url || null;
-  return issueUrl(remote, item.id);
+  if (item.provider === 'ado') return item.url;
+  return item.url || issueUrl(remote, item.id);
 }
 
 interface MainContentProps {
@@ -165,30 +165,6 @@ export function MainContent({
                     title={item.title || undefined}
                   >
                     #{item.id}
-                  </span>
-                );
-              })}
-            </div>
-          ) : activeTask.linkedIssues && activeTask.linkedIssues.length > 0 ? (
-            <div className="flex items-center gap-1">
-              {activeTask.linkedIssues.map((num) => {
-                const url = issueUrl(activeProject?.gitRemote ?? null, num);
-                return url ? (
-                  <a
-                    key={num}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium hover:bg-primary/20 transition-colors"
-                  >
-                    #{num}
-                  </a>
-                ) : (
-                  <span
-                    key={num}
-                    className="px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-medium"
-                  >
-                    #{num}
                   </span>
                 );
               })}
