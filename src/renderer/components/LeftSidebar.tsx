@@ -246,34 +246,22 @@ export function LeftSidebar({
 
                   <span className="truncate flex-1">{project.name}</span>
 
-                  {projectTasks.length > 0 && (
-                    <span className="text-[10px] text-foreground/50 tabular-nums flex-shrink-0 mr-0.5 leading-none">
-                      {projectTasks.length}
-                    </span>
-                  )}
-
-                  {/* Project settings — hover only */}
+                  {/* New task — hover only */}
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <IconButton
                       onClick={(e) => {
                         e.stopPropagation();
-                        onProjectSettings(project.id);
+                        onNewTask(project.id);
                       }}
-                      title="Project settings"
+                      title="New task"
                       size="sm"
                     >
-                      <Settings size={14} strokeWidth={1.8} />
+                      <Plus size={13} strokeWidth={2} />
                     </IconButton>
                   </div>
 
-                  {/* Commit graph — visible on active project, hover on others */}
-                  <div
-                    className={`transition-opacity duration-150 ${
-                      isActive
-                        ? 'opacity-70 hover:opacity-100'
-                        : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                  >
+                  {/* Commit graph — hover only */}
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <IconButton
                       onClick={(e) => {
                         e.stopPropagation();
@@ -286,23 +274,17 @@ export function LeftSidebar({
                     </IconButton>
                   </div>
 
-                  {/* New task — visible on active project, hover on others */}
-                  <div
-                    className={`transition-opacity duration-150 ${
-                      isActive
-                        ? 'opacity-70 hover:opacity-100'
-                        : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                  >
+                  {/* Project settings — hover only */}
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <IconButton
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNewTask(project.id);
+                        onProjectSettings(project.id);
                       }}
-                      title="New task"
+                      title="Project settings"
                       size="sm"
                     >
-                      <Plus size={13} strokeWidth={2} />
+                      <Settings size={14} strokeWidth={1.8} />
                     </IconButton>
                   </div>
 
@@ -320,6 +302,12 @@ export function LeftSidebar({
                       <Trash2 size={13} strokeWidth={1.8} />
                     </IconButton>
                   </div>
+
+                  {projectTasks.length > 0 && (
+                    <span className="text-[10px] text-foreground/50 tabular-nums flex-shrink-0 mr-0.5 leading-none">
+                      {projectTasks.length}
+                    </span>
+                  )}
                 </div>
 
                 {/* Tasks nested under project */}
